@@ -1,0 +1,23 @@
+{
+  "name": "douyin-video-downloader-skill",
+  "version": "0.1.0",
+  "description": "Local Codex skill and Node.js CLI for Douyin video, cover, audio, and user-list collection workflows.",
+  "license": "MIT",
+  "type": "commonjs",
+  "bin": {
+    "douyin-video": "./douyin-video.js"
+  },
+  "scripts": {
+    "check": "node --check douyin-video.js",
+    "help": "node douyin-video.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "codex-skill",
+    "douyin",
+    "video-downloader",
+    "sqlite"
+  ]
+}

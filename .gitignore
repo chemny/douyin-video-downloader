@@ -1,0 +1,38 @@
+# Local outputs
+output/
+downloads/
+audios/
+collection/
+debug/
+
+# Downloaded media
+*.mp4
+*.mov
+*.m4v
+*.mp3
+*.m4a
+*.aac
+*.wav
+*.webp
+*.jpeg
+*.jpg
+*.png
+
+# Local databases
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.db-shm
+*.db-wal
+
+# Browser/auth state
+browser-profile/
+.auth/
+storage-state*.json
+
+# Logs and temp files
+*.log
+.DS_Store
+node_modules/
+npm-debug.log*
