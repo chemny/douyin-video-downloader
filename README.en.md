@@ -21,7 +21,7 @@ After installing, start a fresh agent session so it can rescan skills.
 Ask your agent:
 
 ```text
-Use douyin-video-downloader to download this Douyin video and save its cover and audio: <Douyin link>
+Use douyin-video-downloader to download this Douyin video and save its cover and audio: {Douyin link}
 ```
 
 Or run the CLI directly:
@@ -155,14 +155,14 @@ node douyin-video.js check-login --account default
 ### Collect A User Page
 
 ```bash
-node douyin-video.js collect-user "https://www.douyin.com/user/<sec-user-id>" \
+node douyin-video.js collect-user "https://www.douyin.com/user/{sec-user-id}" \
   --account default \
   --db ./douyin_collection.sqlite \
   -o ./collection \
   --limit 100
 ```
 
-Use `--account <name>` to isolate browser profiles. Without an explicit `--profile-dir`, account profiles are stored under `~/.agents/douyin-video-downloader/accounts/<name>/browser-profile`.
+Use `--account {name}` to isolate browser profiles. Without an explicit `--profile-dir`, account profiles are stored under `~/.agents/douyin-video-downloader/accounts/{name}/browser-profile`.
 
 ### Batch Download From SQLite
 

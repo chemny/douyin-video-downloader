@@ -21,7 +21,7 @@ git clone https://github.com/chemny/douyin-video-downloader.git
 对 Agent 说：
 
 ```text
-使用 douyin-video-downloader 下载这个抖音视频，并保存封面和音频：<抖音链接>
+使用 douyin-video-downloader 下载这个抖音视频，并保存封面和音频：{抖音链接}
 ```
 
 也可以直接运行 CLI：
@@ -155,14 +155,14 @@ node douyin-video.js check-login --account default
 ### 采集用户主页
 
 ```bash
-node douyin-video.js collect-user "https://www.douyin.com/user/<sec-user-id>" \
+node douyin-video.js collect-user "https://www.douyin.com/user/{sec-user-id}" \
   --account default \
   --db ./douyin_collection.sqlite \
   -o ./collection \
   --limit 100
 ```
 
-推荐用 `--account <name>` 隔离不同账号。未显式指定 `--profile-dir` 时，账号 profile 会保存在 `~/.agents/douyin-video-downloader/accounts/<name>/browser-profile`。
+推荐用 `--account {name}` 隔离不同账号。未显式指定 `--profile-dir` 时，账号 profile 会保存在 `~/.agents/douyin-video-downloader/accounts/{name}/browser-profile`。
 
 ### 从 SQLite 批量下载
 
