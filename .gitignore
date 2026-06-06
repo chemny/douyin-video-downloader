@@ -28,6 +28,7 @@ debug/
 
 # Browser/auth state
 browser-profile/
+accounts/
 .auth/
 storage-state*.json
 

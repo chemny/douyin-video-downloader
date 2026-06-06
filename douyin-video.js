@@ -8,7 +8,9 @@ const { spawnSync } = require('child_process');
 const readline = require('readline');
 const { URL } = require('url');
 
-const DEFAULT_BROWSER_PROFILE = path.join(process.env.HOME || '.', '.agents', 'douyin-video-downloader', 'browser-profile');
+const DEFAULT_DATA_DIR = path.join(process.env.HOME || '.', '.agents', 'douyin-video-downloader');
+const DEFAULT_BROWSER_PROFILE = path.join(DEFAULT_DATA_DIR, 'browser-profile');
+const DEFAULT_ACCOUNTS_DIR = path.join(DEFAULT_DATA_DIR, 'accounts');
 
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) EdgiOS/121.0.2277.107 Version/17.0 Mobile/15E148 Safari/604.1',
@@ -315,6 +317,29 @@ function runPwcli(args, options = {}) {
 
 function normalizeSessionName(value) {
   return String(value || 'dyvdl').replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 24) || 'dyvdl';
+}
+
+function normalizeAccountName(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const slug = raw.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 48);
+  if (slug) return slug;
+  return `acct-${Buffer.from(raw).toString('hex').slice(0, 24)}`;
+}
+
+function resolveBrowserContext(args = {}) {
+  const account = normalizeAccountName(args.account);
+  const browserSession = args.browserSessionExplicit
+    ? args.browserSession
+    : (account ? `dyvdl-${account}` : args.browserSession);
+  const profileDir = args.profileDirExplicit
+    ? args.profileDir
+    : (account ? path.join(DEFAULT_ACCOUNTS_DIR, account, 'browser-profile') : args.profileDir);
+  return {
+    account,
+    session: normalizeSessionName(browserSession || 'dyvdl'),
+    profileDir: profileDir || DEFAULT_BROWSER_PROFILE
+  };
 }
 
 function resolvePwcliPath() {
@@ -653,8 +678,9 @@ async function collectUser(args) {
   const userUrl = args.shareLink;
   const outputDir = args.outputDir || './output';
   const debugDir = path.join(outputDir, 'debug');
-  const session = normalizeSessionName(args.browserSession || 'dyvdl');
-  const profileDir = args.profileDir || DEFAULT_BROWSER_PROFILE;
+  const browser = resolveBrowserContext(args);
+  const session = browser.session;
+  const profileDir = browser.profileDir;
 
   if (args.reuseSession) {
     runPwcli(['-s=' + session, 'goto', userUrl]);
@@ -687,8 +713,33 @@ async function collectUser(args) {
   console.log(`Collection DB: ${path.resolve(args.dbPath)}`);
   console.log(`Export JSON: ${exportJson}`);
   console.log(`Export CSV: ${exportCsv}`);
+  if (browser.account) console.log(`Account: ${browser.account}`);
+  console.log(`Browser profile: ${profileDir}`);
   console.log('Collection completed. No download was started. Confirm with the user before running db-download-batch.');
   return result;
+}
+
+async function checkLogin(args) {
+  const browser = resolveBrowserContext(args);
+  const session = browser.session;
+  const profileDir = browser.profileDir;
+
+  if (args.reuseSession) {
+    runPwcli(['-s=' + session, 'goto', 'https://www.douyin.com/']);
+  } else {
+    openCollectBrowser(session, 'https://www.douyin.com/', { profileDir });
+  }
+  await sleep(3000);
+
+  const loggedIn = hasValidLoginCookies(session);
+  console.log(`Login status: ${loggedIn ? 'valid' : 'not logged in'}`);
+  if (browser.account) console.log(`Account: ${browser.account}`);
+  console.log(`Browser session: ${session}`);
+  console.log(`Browser profile: ${profileDir}`);
+  if (!loggedIn) {
+    console.log('Please scan the Douyin login QR code in the opened browser, then rerun check-login or collect-user.');
+  }
+  return loggedIn;
 }
 
 function exportCollectionDb(dbPath, outputPath, format = 'json') {
@@ -1373,7 +1424,10 @@ function parseArgs(args) {
     profileDir: DEFAULT_BROWSER_PROFILE,
     loginTimeoutSeconds: 180,
     reuseSession: false,
-    secUserId: null
+    secUserId: null,
+    account: null,
+    browserSessionExplicit: false,
+    profileDirExplicit: false
   };
 
   for (let i = hasShareLink ? 2 : 1; i < args.length; i++) {
@@ -1402,14 +1456,18 @@ function parseArgs(args) {
       parsed.quiet = true;
     } else if (arg === '--browser-session' && args[i + 1]) {
       parsed.browserSession = args[++i];
+      parsed.browserSessionExplicit = true;
     } else if (arg === '--profile-dir' && args[i + 1]) {
       parsed.profileDir = args[++i];
+      parsed.profileDirExplicit = true;
     } else if (arg === '--login-timeout' && args[i + 1]) {
       parsed.loginTimeoutSeconds = Number(args[++i]) || 180;
     } else if (arg === '--reuse-session') {
       parsed.reuseSession = true;
     } else if (arg === '--sec-user-id' && args[i + 1]) {
       parsed.secUserId = args[++i];
+    } else if (arg === '--account' && args[i + 1]) {
+      parsed.account = args[++i];
     }
   }
 
@@ -1426,6 +1484,7 @@ Usage:
   node douyin-video.js cover <share-link> [-o output-dir] [--cover-size medium]
   node douyin-video.js audio <share-link> [-o output-dir] [--quality best]
   node douyin-video.js db-init --db ./douyin_collection.sqlite
+  node douyin-video.js check-login [--account default] [--profile-dir path] [--reuse-session]
   node douyin-video.js collect-user <user-home-url> --db ./douyin_collection.sqlite -o ./collection [--limit 100]
   node douyin-video.js db-import-post-json --db ./douyin_collection.sqlite --input ./post.json [--limit 100]
   node douyin-video.js db-export --db ./douyin_collection.sqlite -o ./videos.json [--format json|csv]
@@ -1445,6 +1504,7 @@ Audio:
 Collection DB:
   The SQLite collection stores users, crawl pages, videos, stats, and music URLs.
   collect-user reuses a persistent browser profile and prompts for QR login only when needed.
+  Use --account to isolate browser profiles under ~/.agents/douyin-video-downloader/accounts/<account>/browser-profile.
   Import logged-in /aweme/v1/web/aweme/post/ JSON response bodies with db-import-post-json.
   Collection imports are capped at the first 100 videos by default and never start downloads automatically.
   Batch downloads process URLs sequentially and wait at least 5 seconds before the next URL.
@@ -1494,6 +1554,9 @@ async function main() {
       console.log(`Audio source: ${result.source}`);
     } else if (args.command === 'collect-user') {
       await collectUser(args);
+    } else if (args.command === 'check-login') {
+      const loggedIn = await checkLogin(args);
+      if (!loggedIn) process.exitCode = 2;
     } else if (args.command === 'db-init') {
       initCollectionDb(args.dbPath);
       console.log(`Collection DB initialized: ${path.resolve(args.dbPath)}`);

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0
+
+- Added `check-login` to validate Douyin browser login state before collection.
+- Added `--account` browser profile isolation for collection and login checks.
+- Added CLI contract, runtime requirements, troubleshooting, and agent bootstrap docs.
+- Added shell examples for single download, user collection, and batch download workflows.
+- Reworked bilingual README structure around audience value, install, quick start, core workflows, command reference, and safety rules.
+
 ## 0.1.0
 
 - Added single Douyin video parsing and quality selection.

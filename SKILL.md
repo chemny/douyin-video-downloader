@@ -1,7 +1,7 @@
 ---
 name: douyin-video-downloader
-description: Download Douyin videos or direct Douyin music audio using a local Node.js CLI. Use this skill whenever the user wants to parse a Douyin share link, inspect available video qualities, choose a quality, download a Douyin MP4 video, or download the direct audio exposed by Douyin music detail.
-version: 0.1.0
+description: Collect and download Douyin videos, cover images, direct music audio, and user-page video lists using a local Node.js CLI and SQLite. Use this skill when the user wants to parse a Douyin share link, inspect video quality or cover candidates, download MP4 video, download direct Douyin music audio, collect public creator post metadata, export JSON/CSV, or batch download videos, covers, and audio from a local collection database.
+version: 0.2.0
 metadata:
   openclaw:
     emoji: 🎵
@@ -129,28 +129,38 @@ node {SKILL_DIR}/douyin-video.js db-import-post-json \
 node {SKILL_DIR}/douyin-video.js collect-user "抖音用户主页 URL" \
   --db ./douyin_collection.sqlite \
   -o ./collection \
+  --account default \
   --limit 100
 ```
 
 `collect-user` 会：
 
-- 使用固定浏览器 profile：`~/.agents/douyin-video-downloader/browser-profile`
+- 使用固定浏览器 profile；指定 `--account` 时使用 `~/.agents/douyin-video-downloader/accounts/<account>/browser-profile`
 - 优先复用已有登录态；如果 `sessionid` / `sid_guard` 有效，就直接抓取
 - 如果登录态不可用，打开浏览器并提示用户扫码登录
 - 等用户登录后继续抓取 `/aweme/v1/web/aweme/post/`
 - 保存原始接口 JSON、导入 SQLite，并导出 JSON/CSV
 - 采集完成后只提示完成，不自动下载
 
+### 检查登录状态
+
+```bash
+node {SKILL_DIR}/douyin-video.js check-login --account default
+```
+
+`check-login` 会打开或复用账号对应的浏览器 profile，并检查抖音登录 cookie 是否可用。登录有效时返回 0；未登录时返回 2，并提示用户在打开的浏览器里扫码登录。这个命令只检查登录状态，不采集、不下载。
+
 可选参数：
 
 ```bash
+--account default
 --browser-session douyin-video-downloader
 --profile-dir ~/.agents/douyin-video-downloader/browser-profile
 --login-timeout 180
 --reuse-session
 ```
 
-`--browser-session` 会被规范为较短的安全名称，避免 Playwright CLI socket 路径过长。已有登录浏览器 session 时，可以加 `--reuse-session` 直接复用，不重新打开浏览器。
+`--account` 是推荐的账号隔离方式。没有指定 `--profile-dir` 时，账号名会自动映射到独立 browser profile；没有指定 `--browser-session` 时，账号名也会用于生成稳定 session 名称。`--browser-session` 会被规范为较短的安全名称，避免 Playwright CLI socket 路径过长。已有登录浏览器 session 时，可以加 `--reuse-session` 直接复用，不重新打开浏览器。
 
 如果本机没有 Playwright CLI 运行环境，命令会提示安装依赖，不会自动安装。
 
