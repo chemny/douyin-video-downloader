@@ -90,7 +90,7 @@ flowchart TD
 ## 运行要求
 
 - Node.js 18 或更高版本。
-- 系统 `sqlite3`，用于本地采集库。
+- 系统 `sqlite3` 命令行工具，用于本地采集库。Windows 需要安装 `sqlite3.exe` 并加入 `PATH`。
 - 能访问抖音和抖音 CDN。
 - 可选：`collect-user` 浏览器采集需要 Playwright CLI wrapper。
 
@@ -99,6 +99,8 @@ flowchart TD
 ```bash
 export PWCLI="$HOME/.agents/skills/playwright/scripts/playwright_cli.sh"
 ```
+
+Windows 可以把 `PWCLI` 指向 `playwright_cli.cmd` 或 `playwright_cli.ps1`。
 
 单条视频、封面、音频、数据库导入、导出，以及基于已有数据库的批量下载，不需要 Playwright。
 
@@ -196,6 +198,16 @@ node douyin-video.js db-download-audio-batch \
 
 已在 Codex 中测试。Claude Code 和 OpenClaw 当前环境尚未测试，但本仓库按可移植的单 skill 结构设计，`SKILL.md` 位于仓库根目录。
 
+```text
+macOS / Linux:
+  单条下载、SQLite 流程、浏览器采集：已按类 Unix 环境设计。
+
+Windows:
+  支持单条视频、封面、直接音频。
+  SQLite 导入、导出、批量下载：安装 sqlite3.exe 并加入 PATH 后支持。
+  用户主页浏览器采集：需要可用的 Playwright CLI wrapper，并通过 PWCLI 指向 .cmd 或 .ps1。
+```
+
 ## 仓库结构
 
 ```text
@@ -212,8 +224,11 @@ douyin-video-downloader/
 │   ├── publish-check.mjs
 │   ├── smoke-test.mjs
 │   └── examples/
+│       ├── batch_download.ps1
 │       ├── batch_download.sh
+│       ├── collect_user.ps1
 │       ├── collect_user.sh
+│       ├── single_download.ps1
 │       └── single_download.sh
 └── docs/
     ├── agent-bootstrap.md

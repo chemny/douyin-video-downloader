@@ -1,7 +1,7 @@
 ---
 name: douyin-video-downloader
 description: Collect and download Douyin videos, cover images, direct music audio, and user-page video lists using a local Node.js CLI and SQLite. Use this skill when the user wants to parse a Douyin share link, inspect video quality or cover candidates, download MP4 video, download direct Douyin music audio, collect public creator post metadata, export JSON/CSV, or batch download videos, covers, and audio from a local collection database.
-version: 0.2.0
+version: 0.2.1
 metadata:
   openclaw:
     emoji: 🎵

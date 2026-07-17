@@ -61,7 +61,7 @@ if (!/^name:\s*douyin-video-downloader/m.test(skill)) addFail('SKILL.md name mis
 if (!/^description:\s*\S+/m.test(skill)) addFail('SKILL.md description missing');
 
 const allFiles = await walk(repoRoot);
-const textExtensions = new Set(['.md', '.js', '.mjs', '.json', '.sh', '.gitignore']);
+const textExtensions = new Set(['.md', '.js', '.mjs', '.json', '.sh', '.ps1', '.gitignore']);
 const suspiciousPatterns = [
   { name: 'local absolute path', pattern: new RegExp('(/(Users|Volumes|home)/|(^|[\\s"\'`(])[A-Za-z]:[\\\\/])') },
   { name: 'private token marker', pattern: new RegExp(`(${['gh', 'p_'].join('')}|${['github', '_pat_'].join('')}|sk-(proj|live|test)-[A-Za-z0-9]|Bearer\\s+[A-Za-z0-9._-]{20,})`) },

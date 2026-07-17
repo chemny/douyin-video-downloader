@@ -23,7 +23,10 @@ const requiredFiles = [
   'docs/troubleshooting.md',
   'scripts/examples/single_download.sh',
   'scripts/examples/collect_user.sh',
-  'scripts/examples/batch_download.sh'
+  'scripts/examples/batch_download.sh',
+  'scripts/examples/single_download.ps1',
+  'scripts/examples/collect_user.ps1',
+  'scripts/examples/batch_download.ps1'
 ];
 
 const errors = [];
@@ -54,11 +57,26 @@ if (!readmeEn.includes('[中文](./README.md)')) errors.push('README.en.md does 
 const nodeCheck = spawnSync('node', ['--check', 'douyin-video.js'], { cwd: repoRoot, encoding: 'utf8' });
 if (nodeCheck.status !== 0) errors.push(`node --check failed: ${(nodeCheck.stderr || nodeCheck.stdout).trim()}`);
 
+const hasBash = spawnSync('bash', ['--version'], { cwd: repoRoot, encoding: 'utf8' }).status === 0;
 const examplesDir = path.join(repoRoot, 'scripts', 'examples');
 for (const file of await readdir(examplesDir)) {
   if (!file.endsWith('.sh')) continue;
+  if (!hasBash) continue;
   const bashCheck = spawnSync('bash', ['-n', path.join('scripts', 'examples', file)], { cwd: repoRoot, encoding: 'utf8' });
   if (bashCheck.status !== 0) errors.push(`bash -n failed for ${file}: ${(bashCheck.stderr || bashCheck.stdout).trim()}`);
+}
+
+const hasPwsh = spawnSync('pwsh', ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.ToString()'], { cwd: repoRoot, encoding: 'utf8' }).status === 0;
+for (const file of await readdir(examplesDir)) {
+  if (!file.endsWith('.ps1')) continue;
+  if (!hasPwsh) continue;
+  const scriptPath = path.join('scripts', 'examples', file);
+  const psCheck = spawnSync('pwsh', [
+    '-NoProfile',
+    '-Command',
+    `$errors = $null; [System.Management.Automation.PSParser]::Tokenize((Get-Content -Raw '${scriptPath.replace(/'/g, "''")}'), [ref]$errors) > $null; if ($errors) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }`
+  ], { cwd: repoRoot, encoding: 'utf8' });
+  if (psCheck.status !== 0) errors.push(`PowerShell parse failed for ${file}: ${(psCheck.stderr || psCheck.stdout).trim()}`);
 }
 
 if (errors.length) {

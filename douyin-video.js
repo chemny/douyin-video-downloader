@@ -8,7 +8,9 @@ const { spawnSync } = require('child_process');
 const readline = require('readline');
 const { URL } = require('url');
 
-const DEFAULT_DATA_DIR = path.join(process.env.HOME || '.', '.agents', 'douyin-video-downloader');
+const HOME_DIR = process.env.HOME || process.env.USERPROFILE || '.';
+const IS_WINDOWS = process.platform === 'win32';
+const DEFAULT_DATA_DIR = path.join(HOME_DIR, '.agents', 'douyin-video-downloader');
 const DEFAULT_BROWSER_PROFILE = path.join(DEFAULT_DATA_DIR, 'browser-profile');
 const DEFAULT_ACCOUNTS_DIR = path.join(DEFAULT_DATA_DIR, 'accounts');
 
@@ -279,11 +281,13 @@ function sqliteValue(value) {
 }
 
 function runSqlite(dbPath, sql) {
+  ensureSqliteAvailable();
   fs.mkdirSync(path.dirname(path.resolve(dbPath)), { recursive: true });
   const result = spawnSync('sqlite3', [dbPath], {
     input: sql,
     encoding: 'utf8',
-    maxBuffer: 1024 * 1024 * 50
+    maxBuffer: 1024 * 1024 * 50,
+    shell: IS_WINDOWS
   });
   if (result.status !== 0) {
     throw new Error((result.stderr || result.stdout || 'sqlite3 failed').trim());
@@ -292,10 +296,14 @@ function runSqlite(dbPath, sql) {
 }
 
 function runCommand(command, args, options = {}) {
+  const spawnOptions = { ...options };
+  delete spawnOptions.pwcli;
+  delete spawnOptions.profileDir;
+  delete spawnOptions.loginTimeoutSeconds;
   const result = spawnSync(command, args, {
     encoding: 'utf8',
     maxBuffer: 1024 * 1024 * 50,
-    ...options
+    ...spawnOptions
   });
   if (result.status !== 0) {
     throw new Error((result.stderr || result.stdout || `${command} failed`).trim());
@@ -309,10 +317,20 @@ function runPwcli(args, options = {}) {
     throw new Error([
       'Playwright CLI wrapper not found.',
       'Set PWCLI to the wrapper path, or install the playwright skill under ~/.agents/skills or ~/.codex/skills.',
-      'Expected wrapper: playwright/scripts/playwright_cli.sh'
+      'Expected wrapper: playwright/scripts/playwright_cli.sh, playwright_cli.cmd, or playwright_cli.ps1'
     ].join('\n'));
   }
-  return runCommand(pwcli, args, options);
+  const ext = path.extname(pwcli).toLowerCase();
+  if (IS_WINDOWS && ext === '.ps1') {
+    return runCommand('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', pwcli, ...args], {
+      ...options,
+      shell: false
+    });
+  }
+  return runCommand(pwcli, args, {
+    ...options,
+    shell: IS_WINDOWS && (ext === '.cmd' || ext === '.bat')
+  });
 }
 
 function normalizeSessionName(value) {
@@ -343,13 +361,38 @@ function resolveBrowserContext(args = {}) {
 }
 
 function resolvePwcliPath() {
-  const home = process.env.HOME || '.';
+  const home = HOME_DIR;
   const candidates = [
     process.env.PWCLI,
+    ...(IS_WINDOWS ? [
+      path.join(home, '.agents', 'skills', 'playwright', 'scripts', 'playwright_cli.cmd'),
+      path.join(home, '.agents', 'skills', 'playwright', 'scripts', 'playwright_cli.ps1'),
+      path.join(home, '.codex', 'skills', 'playwright', 'scripts', 'playwright_cli.cmd'),
+      path.join(home, '.codex', 'skills', 'playwright', 'scripts', 'playwright_cli.ps1')
+    ] : []),
     path.join(home, '.agents', 'skills', 'playwright', 'scripts', 'playwright_cli.sh'),
     path.join(home, '.codex', 'skills', 'playwright', 'scripts', 'playwright_cli.sh')
   ].filter(Boolean);
   return candidates.find(candidate => fs.existsSync(candidate)) || candidates[0];
+}
+
+function ensureSqliteAvailable() {
+  if (ensureSqliteAvailable.checked) return;
+  const result = spawnSync('sqlite3', ['--version'], {
+    encoding: 'utf8',
+    shell: IS_WINDOWS
+  });
+  if (result.status !== 0) {
+    throw new Error([
+      'Collection database commands require the sqlite3 command-line tool.',
+      IS_WINDOWS
+        ? 'On Windows, install sqlite3.exe and make sure it is available in PATH.'
+        : 'Install sqlite3 with your system package manager and make sure it is available in PATH.',
+      'Verify with:',
+      '  sqlite3 --version'
+    ].join('\n'));
+  }
+  ensureSqliteAvailable.checked = true;
 }
 
 function initCollectionDb(dbPath) {
@@ -625,7 +668,10 @@ function hasValidLoginCookies(session) {
 }
 
 function ensureNpxAvailable() {
-  const result = spawnSync('zsh', ['-lc', 'command -v npx >/dev/null 2>&1'], { encoding: 'utf8' });
+  const result = spawnSync('npx', ['--version'], {
+    encoding: 'utf8',
+    shell: IS_WINDOWS
+  });
   if (result.status !== 0) {
     throw new Error([
       'Browser collection requires npx and Playwright CLI.',

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1
+
+- Improved Windows compatibility for home directory detection, `npx` checks, `sqlite3` checks, and Playwright wrapper resolution.
+- Added PowerShell example scripts for single download, user collection, and batch download flows.
+- Updated smoke tests to skip bash-only checks when bash is unavailable.
+- Documented Windows requirements for SQLite and browser collection.
+
 ## 0.2.0
 
 - Added `check-login` to validate Douyin browser login state before collection.

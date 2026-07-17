@@ -34,3 +34,11 @@ For browser collection, set `PWCLI` if the wrapper is not installed under a comm
 ```bash
 export PWCLI="$HOME/.agents/skills/playwright/scripts/playwright_cli.sh"
 ```
+
+On Windows, set `PWCLI` to a compatible wrapper:
+
+```powershell
+$env:PWCLI = "$HOME\.agents\skills\playwright\scripts\playwright_cli.cmd"
+```
+
+PowerShell wrappers are also supported when `PWCLI` points to `playwright_cli.ps1`.

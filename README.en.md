@@ -90,7 +90,7 @@ Default rules:
 ## Requirements
 
 - Node.js 18 or newer.
-- System `sqlite3` for collection database operations.
+- System `sqlite3` command-line tool for collection database operations. On Windows, install `sqlite3.exe` and add it to `PATH`.
 - Network access to Douyin and Douyin CDN endpoints.
 - Optional: Playwright CLI wrapper for `collect-user` browser collection.
 
@@ -99,6 +99,8 @@ Set `PWCLI` if the Playwright CLI wrapper is not under a common skill path:
 ```bash
 export PWCLI="$HOME/.agents/skills/playwright/scripts/playwright_cli.sh"
 ```
+
+On Windows, `PWCLI` can point to `playwright_cli.cmd` or `playwright_cli.ps1`.
 
 Single video, cover, audio, database import/export, and batch downloads from an existing database do not require Playwright.
 
@@ -196,6 +198,16 @@ node douyin-video.js db-download-audio-batch \
 
 Tested with Codex. Claude Code and OpenClaw are not yet tested in this environment, but the skill is designed as a portable single-skill repository with `SKILL.md` at the root.
 
+```text
+macOS / Linux:
+  Single download, SQLite workflows, and browser collection are designed for Unix-like environments.
+
+Windows:
+  Single video, cover, and direct audio are supported.
+  SQLite import/export/batch download: supported after sqlite3.exe is installed and available in PATH.
+  User-page browser collection requires a Playwright CLI wrapper and PWCLI pointing to .cmd or .ps1.
+```
+
 ## Repository Structure
 
 ```text
@@ -212,8 +224,11 @@ douyin-video-downloader/
 │   ├── publish-check.mjs
 │   ├── smoke-test.mjs
 │   └── examples/
+│       ├── batch_download.ps1
 │       ├── batch_download.sh
+│       ├── collect_user.ps1
 │       ├── collect_user.sh
+│       ├── single_download.ps1
 │       └── single_download.sh
 └── docs/
     ├── agent-bootstrap.md

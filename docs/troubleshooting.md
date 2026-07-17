@@ -8,7 +8,23 @@ Set `PWCLI` to the wrapper path:
 export PWCLI="$HOME/.agents/skills/playwright/scripts/playwright_cli.sh"
 ```
 
+On Windows:
+
+```powershell
+$env:PWCLI = "$HOME\.agents\skills\playwright\scripts\playwright_cli.cmd"
+```
+
 Then rerun `check-login` or `collect-user`.
+
+## sqlite3 Not Found
+
+Database commands require the `sqlite3` command-line tool.
+
+On Windows, install SQLite tools, add the directory containing `sqlite3.exe` to `PATH`, then verify:
+
+```powershell
+sqlite3 --version
+```
 
 ## Login Is Missing Or Expired
 
