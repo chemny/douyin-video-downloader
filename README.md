@@ -1,249 +1,140 @@
 # douyin-video-downloader
 
-中文 | [English](./README.en.md)
+English | [中文](./README.zh.md)
 
-面向创作者、运营、内容研究和 Agent 用户的抖音竞品采集工具。它把原本分散在浏览器里的视频、封面、音频、作品列表和互动数据整理成本地可复用的数据资产，减少手动保存、复制链接和反复整理文件的成本，让后续转写、选题复盘、账号对标和内容分析可以从完整、可追溯的数据开始。
+## Overview
 
-它支持下载单条视频、封面图和直接音频，也可以采集用户主页作品列表并保存到 SQLite，方便后续批量下载和导出。
+An Agent Skill for creators and content researchers who want to save Douyin videos, covers, direct music audio, and creator post lists as reusable local files. It includes a Node.js CLI and SQLite collection workflows, so an Agent can inspect a link, save selected media, or collect a creator's posts before asking which items to download.
 
-## 怎么安装？
+## Preview
 
-```bash
-git clone https://github.com/chemny/douyin-video-downloader.git
-```
+![Illustration: a Douyin link produces local video, cover and direct audio; a creator page produces a SQLite collection and JSON or CSV before confirmed batch downloads](./assets/workflow.svg)
 
-把克隆后的目录放到你的 Agent 会扫描的 skills 目录里，或按你的 Agent 的安装方式导入。确保 `SKILL.md` 位于该 skill 目录根部。
+## Features
 
-安装后开一个新的 Agent 会话，让它重新扫描 skills。
+| Capability | What it helps you do |
+|---|---|
+| Single-video downloads | Save MP4 video with a chosen quality and an optional cover. |
+| Creator-page collection | Traverse post pages, save metadata in SQLite, and export JSON or CSV. |
+| Confirmed batch downloads | Download selected videos, covers or direct audio from a collection. |
+| Cover and direct audio | Save a cover separately or download the music URL supplied by Douyin; no audio extraction from video. |
+| Transfer validation and retries | Check complete HTTP transfer, non-empty output and advertised length; retry transient failures while protecting existing files. |
 
-## 快速开始
+## Installation
 
-对 Agent 说：
+### Requirements
+
+Use an Agent client to install and invoke the Skill. Single-link tasks need Node.js and network access; collection integrations can be prepared when requested.
+
+| Item | Requirement |
+|---|---|
+| Agent client | Codex or Claude Code; Codex has been exercised, Claude Code has not been runtime-tested here. |
+| Runtime | Node.js 18 or newer. |
+| Network | Access to Douyin pages and media endpoints. |
+| Collection database | The SQLite command-line tool for database operations. |
+| Browser collection | A compatible Playwright CLI wrapper and a valid local login when required. |
+
+macOS has been tested locally. Windows paths and command launching have been reviewed, but native Windows execution has not been tested in this environment. Browser collection requires a platform-compatible wrapper. See [runtime requirements](./docs/runtime-requirements.md) for setup details.
+
+### Quick Installation
+
+Ask your Agent:
 
 ```text
-使用 douyin-video-downloader 下载这个抖音视频，并保存封面和音频：{抖音链接}
+Install https://github.com/chemny/douyin-video-downloader. Check and prepare the core runtime, then verify that the Skill is installed and can be loaded. Prepare browser collection tools only when I request collection.
 ```
 
-也可以直接运行 CLI：
+The Agent should report the installed location, entry-point readiness and any missing tools or permissions.
+
+## Quick Start
+
+Give your Agent a Douyin share link:
+
+```text
+Download this Douyin video and its cover, and tell me where the files were saved: {Douyin link}
+```
+
+The download produces local media and a metadata JSON file. If quality choices matter, ask to inspect the link before downloading.
+
+## Usage Examples
+
+### Collect a creator's posts before downloading
+
+```text
+Collect up to 100 posts from this Douyin creator page and export a CSV. Do not download the videos yet: {creator page URL}
+```
+
+Collection reuses a local login where possible, follows pages in cursor order and saves each page. The default cap is 100 posts; `--limit 0` removes the item cap with a 1,000-page safety cap. Collection stops on invalid or stalled pagination and exports saved results after a later-page failure.
+
+### Download selected items from a collection
+
+```text
+Show me the collected items so I can choose a batch to download at 1080p with covers.
+```
+
+Batch downloading requires confirmation, waits at least five seconds between items, and asks whether to continue after every ten successful video downloads. Successful downloads are recorded so later runs can skip them.
+
+### Save a cover or direct music audio
+
+```text
+Save the original-size cover and the direct music audio for this link: {Douyin link}
+```
+
+Direct audio depends on an audio URL in Douyin's music metadata. The Skill does not extract audio from video.
+
+### Use the CLI directly
 
 ```bash
 node douyin-video.js info "https://v.douyin.com/example/"
+node douyin-video.js download "https://v.douyin.com/example/" -o ./videos --quality best --cover-size medium
 ```
 
-## 两种核心流程
+See the [CLI contract](./docs/cli-contract.md), [browser login](./docs/browser-login.md) and [batch guide](./docs/batch-download.md) for commands and options.
 
-### 1. 单条视频下载
+## How It Works
 
-适合处理一个抖音分享链接。
+- `SKILL.md` tells the Agent when to use the tool and which confirmations are required.
+- `douyin-video.js` parses links, coordinates browser collection, stores SQLite records and exposes the CLI.
+- `lib/collect-pages.js` checks pagination continuity, limits and repeated results.
+- `lib/reliable-download.js` handles video, cover and direct-audio transfers with temporary files and up to four attempts.
+- `scripts/examples/` provides shell and PowerShell invocation examples. `tests/` covers offline regressions; the smoke and publish checks validate packaging.
 
-```mermaid
-flowchart TD
-  A["抖音分享链接"] --> B["解析视频信息和清晰度"]
-  B --> C["下载 MP4 视频"]
-  B --> D["下载封面图"]
-  B --> E["下载直接音频"]
-  C --> F["合并写入 metadata JSON"]
-  D --> F
-  E --> F
-```
+The core CLI is bundled. Browser collection additionally uses an external Playwright wrapper; it is not required for single-link downloads or existing-database operations. SQLite workflows require the SQLite command-line tool.
 
-常用动作：
+Validated transfers are renamed to their final filenames; failures preserve existing final files. Retries restart from zero. There is no persistent resume, media-decoding check or source checksum verification. Without Content-Length, a completed HTTP stream cannot establish whether the source media itself is complete.
 
-- 查看视频信息和清晰度候选。
-- 按 `best`、`720p`、`1080p` 或候选序号下载视频。
-- 下载默认中档封面，也可以选择其他封面尺寸。
-- 下载抖音音乐信息里的直接音频，不从视频里抽音频。
+Collection preserves raw responses and exports JSON or CSV. Single-item downloads merge video, cover and audio paths in `*_metadata.json`. Login profiles, databases and media stay local. Follow platform access and copyright rules; do not bypass login or verification.
 
-### 2. 用户主页采集和批量下载
-
-适合先采集一个账号的视频列表，再按用户确认批量下载。
-
-```mermaid
-flowchart TD
-  A["用户主页 URL"] --> B["检查或复用登录态"]
-  B --> C["采集作品列表接口"]
-  C --> D["导入 SQLite"]
-  D --> E["导出 JSON / CSV"]
-  D --> F["用户确认后批量下载视频和封面"]
-  D --> G["用户确认后批量下载直接音频"]
-```
-
-默认规则：
-
-- 用户主页最多先采集前 100 条作品。
-- 采集完成后只入库和导出，不自动下载。
-- 批量下载逐条处理，至少间隔 5 秒。
-- 批量视频下载每成功 10 个询问是否继续。
-- 已成功下载的内容会记录状态，后续重复执行会跳过。
-
-## 核心能力
-
-- 解析抖音分享链接，并列出视频清晰度候选。
-- 按指定清晰度下载 MP4 视频。
-- 单独下载封面图，或下载视频时同步保存封面。
-- 通过抖音音乐信息下载直接音频，不使用 ffmpeg 抽取音频。
-- 采集抖音用户主页作品列表到本地 SQLite。
-- 保存用户、列表页、视频、互动数据、音乐数据和下载状态。
-- 导出 JSON 或 CSV。
-- 从 SQLite 批量下载视频、封面和直接音频。
-
-## 运行要求
-
-- Node.js 18 或更高版本。
-- 系统 `sqlite3` 命令行工具，用于本地采集库。Windows 需要安装 `sqlite3.exe` 并加入 `PATH`。
-- 能访问抖音和抖音 CDN。
-- 可选：`collect-user` 浏览器采集需要 Playwright CLI wrapper。
-
-如果 Playwright CLI wrapper 不在常见 skill 路径下，可以设置 `PWCLI`：
-
-```bash
-export PWCLI="$HOME/.agents/skills/playwright/scripts/playwright_cli.sh"
-```
-
-Windows 可以把 `PWCLI` 指向 `playwright_cli.cmd` 或 `playwright_cli.ps1`。
-
-单条视频、封面、音频、数据库导入、导出，以及基于已有数据库的批量下载，不需要 Playwright。
-
-完整运行要求见 [Runtime Requirements](./docs/runtime-requirements.md)。
-
-## 重要规则
-
-- 不绕过登录、风控、版权限制或抖音平台规则。
-- 音频只使用抖音音乐信息里的直接音频地址，不从视频里生成。
-- 用户列表采集和下载是两个步骤，采集完成后必须先让用户确认。
-- 批量下载至少间隔 5 秒。
-- 批量视频下载每 10 个询问是否继续。
-- 不要提交浏览器 profile、cookie、SQLite 数据库、debug 响应或下载媒体。
-
-## 命令参考
-
-### 查看视频信息
-
-```bash
-node douyin-video.js info "https://v.douyin.com/example/" --cover-size medium
-```
-
-### 下载视频和封面
-
-```bash
-node douyin-video.js download "https://v.douyin.com/example/" \
-  -o ./videos \
-  --quality best \
-  --cover-size medium
-```
-
-### 只下载封面
-
-```bash
-node douyin-video.js cover "https://v.douyin.com/example/" \
-  -o ./covers \
-  --cover-size origin
-```
-
-### 下载直接音频
-
-```bash
-node douyin-video.js audio "https://v.douyin.com/example/" -o ./audios
-```
-
-### 检查登录状态
-
-```bash
-node douyin-video.js check-login --account default
-```
-
-`check-login` 会检查账号浏览器 profile 里是否有可用的抖音登录 cookie。未登录时会打开浏览器并提示扫码。
-
-### 采集用户主页
-
-```bash
-node douyin-video.js collect-user "https://www.douyin.com/user/{sec-user-id}" \
-  --account default \
-  --db ./douyin_collection.sqlite \
-  -o ./collection \
-  --limit 100
-```
-
-推荐用 `--account {name}` 隔离不同账号。未显式指定 `--profile-dir` 时，账号 profile 会保存在 `~/.agents/douyin-video-downloader/accounts/{name}/browser-profile`。
-
-### 从 SQLite 批量下载
-
-```bash
-node douyin-video.js db-download-batch \
-  --db ./douyin_collection.sqlite \
-  -o ./videos \
-  --quality best \
-  --cover-size medium \
-  --delay-seconds 5 \
-  --confirm-every 10 \
-  --download-limit 100
-```
-
-```bash
-node douyin-video.js db-download-audio-batch \
-  --db ./douyin_collection.sqlite \
-  -o ./audios \
-  --delay-seconds 5 \
-  --download-limit 100
-```
-
-## 数据和文件
-
-- SQLite 保存用户、列表页、视频、互动数据、音乐数据和下载状态。
-- 原始接口 JSON 会保留，方便后续重新解析。
-- 单条下载会合并写入 `*_metadata.json`，避免视频、封面、音频路径互相覆盖。
-- 数据库结构见 [Database](./docs/database.md)。
-
-## 平台兼容性
-
-已在 Codex 中测试。Claude Code 和 OpenClaw 当前环境尚未测试，但本仓库按可移植的单 skill 结构设计，`SKILL.md` 位于仓库根目录。
-
-```text
-macOS / Linux:
-  单条下载、SQLite 流程、浏览器采集：已按类 Unix 环境设计。
-
-Windows:
-  支持单条视频、封面、直接音频。
-  SQLite 导入、导出、批量下载：安装 sqlite3.exe 并加入 PATH 后支持。
-  用户主页浏览器采集：需要可用的 Playwright CLI wrapper，并通过 PWCLI 指向 .cmd 或 .ps1。
-```
-
-## 仓库结构
+## Repository Structure
 
 ```text
 douyin-video-downloader/
-├── SKILL.md
-├── README.md
-├── README.en.md
-├── douyin-video.js
-├── package.json
-├── LICENSE
-├── SECURITY.md
-├── CHANGELOG.md
+├── SKILL.md                      # Agent instructions
+├── douyin-video.js               # CLI entry point
+├── lib/
+│   ├── collect-pages.js          # Pagination helpers
+│   └── reliable-download.js      # Validated transfers and retries
+├── docs/                         # Setup, CLI, database and troubleshooting
 ├── scripts/
-│   ├── publish-check.mjs
-│   ├── smoke-test.mjs
-│   └── examples/
-│       ├── batch_download.ps1
-│       ├── batch_download.sh
-│       ├── collect_user.ps1
-│       ├── collect_user.sh
-│       ├── single_download.ps1
-│       └── single_download.sh
-└── docs/
-    ├── agent-bootstrap.md
-    ├── batch-download.md
-    ├── browser-login.md
-    ├── cli-contract.md
-    ├── database.md
-    ├── runtime-requirements.md
-    └── troubleshooting.md
+│   ├── examples/                 # Shell and PowerShell examples
+│   ├── smoke-test.mjs            # Package smoke check
+│   └── publish-check.mjs          # Release checks
+├── tests/hardening.test.js       # Offline regression tests
+├── assets/workflow.svg           # Workflow illustration
+├── README.md
+├── README.zh.md
+├── package.json
+├── CHANGELOG.md
+├── SECURITY.md
+└── LICENSE
 ```
 
-## 安全说明
-
-登录态只保存在本地。不要提交浏览器 profile、cookie、storage-state、SQLite 数据库或下载的媒体文件。下载内容请遵守抖音平台规则和相关版权法律。
+Further documentation: [Agent bootstrap](./docs/agent-bootstrap.md), [runtime requirements](./docs/runtime-requirements.md), [CLI contract](./docs/cli-contract.md), [browser login](./docs/browser-login.md), [database](./docs/database.md), [batch downloads](./docs/batch-download.md), [troubleshooting](./docs/troubleshooting.md), [security](./SECURITY.md), and [changelog](./CHANGELOG.md).
 
 ## License
 
-MIT。见 [LICENSE](./LICENSE)。
+The project code is licensed under [MIT](./LICENSE). The license does not grant rights to downloaded third-party videos, music or images.
+
+## About Me
+
+Maintained in [chemny/douyin-video-downloader](https://github.com/chemny/douyin-video-downloader). Report reproducible problems or suggest improvements through [GitHub Issues](https://github.com/chemny/douyin-video-downloader/issues).

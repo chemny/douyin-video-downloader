@@ -37,3 +37,6 @@ storage-state*.json
 .DS_Store
 node_modules/
 npm-debug.log*
+
+# Incomplete downloads (including abrupt termination)
+*.part

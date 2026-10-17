@@ -1,8 +1,8 @@
 ---
 name: douyin-video-downloader
 description: Collect and download Douyin videos, cover images, direct music audio, and user-page video lists using a local Node.js CLI and SQLite. Use this skill when the user wants to parse a Douyin share link, inspect video quality or cover candidates, download MP4 video, download direct Douyin music audio, collect public creator post metadata, export JSON/CSV, or batch download videos, covers, and audio from a local collection database.
-version: 0.2.1
 metadata:
+  version: 0.2.2
   openclaw:
     emoji: 🎵
 ---
@@ -21,7 +21,8 @@ metadata:
 - 下载抖音音乐详情接口暴露的直接音频文件
 - 从采集库批量下载直接音频
 - 用本地 SQLite 采集库记录用户、列表页、视频、统计和音乐信息
-- 自动打开用户主页并复用本地浏览器登录态采集列表
+- 自动打开用户主页并复用本地浏览器登录态，自动翻页采集列表
+- 下载完整性检查、临时文件保护和有限重试（视频、封面、直接音频共用）
 - 从采集库导出 JSON/CSV，或按批次下载库里的视频
 - 默认尽量使用无水印播放地址
 
@@ -139,8 +140,13 @@ node {SKILL_DIR}/douyin-video.js collect-user "抖音用户主页 URL" \
 - 优先复用已有登录态；如果 `sessionid` / `sid_guard` 有效，就直接抓取
 - 如果登录态不可用，打开浏览器并提示用户扫码登录
 - 等用户登录后继续抓取 `/aweme/v1/web/aweme/post/`
-- 保存原始接口 JSON、导入 SQLite，并导出 JSON/CSV
+- 清理旧页面请求列表，从请求游标 `max_cursor=0` 的第一页开始；按顺序处理预加载页，再滚动作品列表触发下一页
+- 每页请求游标必须等于上一页响应游标，确保分页衔接；逐页保存原始 JSON 和导入 SQLite
+- 达到上限、`has_more=0` 时正常结束；游标重复、无新增作品、接口异常或下一页超时时停止并保留已采集数据
+- 导出 JSON/CSV；后续页失败时也导出已经采集的数据
 - 采集完成后只提示完成，不自动下载
+
+默认采集库上限为 100 条；`--limit 0` 表示不设作品数量上限（仍有 1000 页安全上限）。重复作品更新现有记录，不占用新增名额。达到上限时仍可更新当前页的已有记录。
 
 ### 检查登录状态
 
@@ -205,3 +211,17 @@ node {SKILL_DIR}/douyin-video.js db-download-audio-batch \
 - 音频下载只使用抖音音乐详情接口返回的直接音频地址，不会用 ffmpeg 从视频中抽取。
 - 列表采集和视频下载是两个独立步骤；没有用户确认时，不执行批量下载。
 - 下载进度默认每 5% 输出一次；需要更安静时可以加 `--quiet`。
+
+## 下载可靠性
+
+- 视频、封面和直接音频统一使用最多 4 次下载尝试（首次 + 3 次重试）。
+- 网络中断、60 秒无数据超时、HTTP 408/425/429 和 5xx 可重试，等待默认为 1/2/4 秒；参考 Retry-After，但单次等待最多 30 秒。
+- 其他 HTTP 错误、HTML/JSON 页面和本地磁盘权限或空间错误直接失败。
+- 每次重试从零开始写独立 `.part` 临时文件，避免拼接重复数据；本版本不做跨进程断点续传。
+- 完成时校验 HTTP 流正常结束、文件非空；有 Content-Length 时要求字节数完全一致。没有长度时只能验证完整 HTTP 流，不能确认源站媒体本身是否完整。
+- 校验通过后才将临时文件重命名为最终文件；失败清理本次临时文件并保留之前的正式文件。强制终止进程可能留下 `.part`，后续下载不会复用它。
+- 这些检查不等于媒体解码检查或源站哈希校验。遇到验证页面时交由用户正常处理，不绕过验证。
+
+## 开发验证
+
+运行 `npm test` 执行离线回归测试，覆盖多页采集、去重和上限、截断与超时重试、正式文件保护，以及清晰度/封面/直接音频兼容性。

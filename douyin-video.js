@@ -7,6 +7,8 @@ const http = require('http');
 const { spawnSync } = require('child_process');
 const readline = require('readline');
 const { URL } = require('url');
+const { reliableDownload } = require('./lib/reliable-download');
+const { collectPages } = require('./lib/collect-pages');
 
 const HOME_DIR = process.env.HOME || process.env.USERPROFILE || '.';
 const IS_WINDOWS = process.platform === 'win32';
@@ -77,55 +79,7 @@ function followRedirect(url) {
 }
 
 async function downloadFile(url, filepath, showProgress = true) {
-  return new Promise((resolve, reject) => {
-    const parsedUrl = new URL(url);
-    const client = parsedUrl.protocol === 'https:' ? https : http;
-
-    const req = client.get(url, { headers: HEADERS }, (res) => {
-      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        const nextUrl = res.headers.location.startsWith('http')
-          ? res.headers.location
-          : `${parsedUrl.protocol}//${parsedUrl.host}${res.headers.location}`;
-        downloadFile(nextUrl, filepath, showProgress).then(resolve).catch(reject);
-        return;
-      }
-
-      if (res.statusCode !== 200) {
-        reject(new Error(`HTTP ${res.statusCode}`));
-        return;
-      }
-
-      const totalSize = Number.parseInt(res.headers['content-length'] || '0', 10);
-      let downloaded = 0;
-      let lastProgressBucket = -1;
-      const writer = fs.createWriteStream(filepath);
-
-      res.on('data', (chunk) => {
-        downloaded += chunk.length;
-        if (showProgress && totalSize > 0) {
-          const progress = downloaded / totalSize * 100;
-          const bucket = Math.min(100, Math.floor(progress / 5) * 5);
-          if (bucket !== lastProgressBucket) {
-            lastProgressBucket = bucket;
-            process.stdout.write(`\rDownload progress: ${bucket}%`);
-          }
-        }
-      });
-
-      res.pipe(writer);
-      writer.on('finish', () => {
-        if (showProgress) console.log(`\nSaved: ${filepath}`);
-        resolve(filepath);
-      });
-      writer.on('error', reject);
-    });
-
-    req.on('error', reject);
-    req.setTimeout(60000, () => {
-      req.destroy();
-      reject(new Error('Download timeout'));
-    });
-  });
+  return reliableDownload(url, filepath, { headers: HEADERS, showProgress });
 }
 
 function readExistingMetadata(metadataPath) {
@@ -320,17 +274,27 @@ function runPwcli(args, options = {}) {
       'Expected wrapper: playwright/scripts/playwright_cli.sh, playwright_cli.cmd, or playwright_cli.ps1'
     ].join('\n'));
   }
+  const structured = ['requests', 'response-body', 'cookie-list'].some(command => args.includes(command));
+  const cliArgs = structured ? [...args, '--json'] : args;
+  const unwrap = output => {
+    if (!structured) return output;
+    try {
+      const envelope = JSON.parse(output);
+      if (typeof envelope.result === 'string') return envelope.result;
+    } catch {}
+    return output;
+  };
   const ext = path.extname(pwcli).toLowerCase();
   if (IS_WINDOWS && ext === '.ps1') {
-    return runCommand('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', pwcli, ...args], {
+    return unwrap(runCommand('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', pwcli, ...cliArgs], {
       ...options,
       shell: false
-    });
+    }));
   }
-  return runCommand(pwcli, args, {
+  return unwrap(runCommand(pwcli, cliArgs, {
     ...options,
     shell: IS_WINDOWS && (ext === '.cmd' || ext === '.bat')
-  });
+  }));
 }
 
 function normalizeSessionName(value) {
@@ -591,7 +555,18 @@ function importPostJsonToDb(dbPath, jsonPath, options = {}) {
   const collectionLimit = Math.max(0, Number(options.limit ?? 100) || 0);
   const existingCount = countVideosForUser(dbPath, secUserId);
   const remainingSlots = collectionLimit > 0 ? Math.max(0, collectionLimit - existingCount) : allRows.length;
-  const rows = allRows.slice(0, remainingSlots);
+  const knownIds = new Set(JSON.parse(runSqlite(dbPath, `SELECT json_group_array(aweme_id) FROM videos WHERE sec_user_id = ${sqliteValue(secUserId)};`) || '[]'));
+  let slots = remainingSlots;
+  const seenIds = new Set();
+  const rows = allRows.filter(row => {
+    const id = row.video.aweme_id;
+    if (seenIds.has(id)) return false;
+    seenIds.add(id);
+    if (knownIds.has(id)) return true;
+    if (collectionLimit > 0 && slots <= 0) return false;
+    slots--;
+    return true;
+  });
 
   const statements = ['BEGIN TRANSACTION;'];
   for (const row of rows) {
@@ -661,7 +636,7 @@ function responseLooksUsable(jsonPath) {
 function hasValidLoginCookies(session) {
   try {
     const cookies = runPwcli(['-s=' + session, 'cookie-list']);
-    return /(^|\n)\d+:sessionid=/.test(cookies) || /(^|\n)\d+:sid_guard=/.test(cookies);
+    return /(^|\n)(?:\d+:)?sessionid=/.test(cookies) || /(^|\n)(?:\d+:)?sid_guard=/.test(cookies);
   } catch {
     return false;
   }
@@ -690,15 +665,30 @@ function openCollectBrowser(session, userUrl, options = {}) {
   return opened;
 }
 
-function captureLatestPostResponse(session, outputDir, label = 'post') {
-  const requests = runPwcli(['-s=' + session, 'requests']);
-  const index = extractRequestIndex(requests, '/aweme/v1/web/aweme/post/');
-  if (!index) return null;
+function postRequestEntries(requests) {
+  return String(requests).split('\n').filter(line => line.includes('/aweme/v1/web/aweme/post/'))
+    .map(line => {
+      const index = extractRequestIndex(line, '/aweme/v1/web/aweme/post/');
+      const match = line.match(/https?:\/\/[^\s]+/);
+      if (index === null || !match) return null;
+      const url = new URL(match[0]);
+      return { index, cursor: url.searchParams.get('max_cursor'), user: url.searchParams.get('sec_user_id') };
+    }).filter(Boolean).sort((a, b) => a.index - b.index);
+}
+
+function captureLatestPostResponse(session, outputDir, label = 'post', afterIndex = -1) {
+  const entries = postRequestEntries(runPwcli(['-s=' + session, 'requests']))
+    .filter(entry => entry.index > afterIndex && entry.cursor === '0');
   fs.mkdirSync(outputDir, { recursive: true });
-  const jsonPath = path.join(outputDir, `${label}_${index}.json`);
-  const body = runPwcli(['-s=' + session, 'response-body', String(index)]);
-  fs.writeFileSync(jsonPath, body, 'utf8');
-  return { index, jsonPath, usable: responseLooksUsable(jsonPath) };
+  for (const { index, cursor } of entries) {
+    let body;
+    try { body = runPwcli(['-s=' + session, 'response-body', String(index)]); }
+    catch { continue; }
+    const jsonPath = path.join(outputDir, `${label}_${index}.json`);
+    fs.writeFileSync(jsonPath, body, 'utf8');
+    if (responseLooksUsable(jsonPath)) return { index, jsonPath, usable: true, requestCursor: cursor };
+  }
+  return null;
 }
 
 async function waitForLoginAndPost(session, outputDir, options = {}) {
@@ -712,12 +702,47 @@ async function waitForLoginAndPost(session, outputDir, options = {}) {
     if (hasValidLoginCookies(session)) {
       runPwcli(['-s=' + session, 'reload']);
       await sleep(3000);
-      const captured = captureLatestPostResponse(session, outputDir, 'post');
+      const captured = captureLatestPostResponse(session, outputDir, 'post', options.afterIndex ?? -1);
       if (captured?.usable) return captured;
     }
   }
 
   throw new Error('Timed out waiting for Douyin login. Please rerun collect-user after logging in.');
+}
+
+async function waitForNextPostPage(session, outputDir, afterIndex, expectedUser, expectedCursor) {
+  for (let attempt = 0; attempt < 15; attempt++) {
+    const requests = runPwcli(['-s=' + session, 'requests']);
+    const entries = postRequestEntries(requests);
+    for (const { index, cursor, user } of entries) {
+      if (index <= afterIndex || cursor !== String(expectedCursor) || (user && user !== expectedUser)) continue;
+      let body;
+      try { body = runPwcli(['-s=' + session, 'response-body', String(index)]); }
+      catch { continue; } // Request may still be in flight; retry this index.
+      let payload;
+      try { payload = JSON.parse(body); }
+      catch { throw new Error('Next page returned non-JSON data; check browser login or verification.'); }
+      const jsonPath = path.join(outputDir, `post_${index}.json`);
+      fs.writeFileSync(jsonPath, body, 'utf8');
+      return { index, jsonPath, payload, requestCursor: cursor };
+    }
+    if (attempt === 0 || attempt % 3 === 0) {
+      // Scroll the browser's own list so Douyin supplies its normal signed next-page request.
+      runPwcli(['-s=' + session, 'run-code', `async (page) => {
+        await page.evaluate(() => {
+          window.scrollBy(0, window.innerHeight);
+          const candidates = [...document.querySelectorAll('*')].filter(el => {
+            const style = getComputedStyle(el);
+            return /(auto|scroll)/.test(style.overflowY) && el.scrollHeight > el.clientHeight && el.clientHeight > 100
+              && el.getBoundingClientRect().width > 100 && el.querySelector('a[href*="/video/"]');
+          }).sort((a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight);
+          if (candidates[0]) candidates[0].scrollTop += candidates[0].clientHeight;
+        });
+      }`]);
+    }
+    await sleep(1000);
+  }
+  return null;
 }
 
 async function collectUser(args) {
@@ -728,24 +753,52 @@ async function collectUser(args) {
   const session = browser.session;
   const profileDir = browser.profileDir;
 
+  const afterIndex = -1;
   if (args.reuseSession) {
+    // CLI request numbers reset on navigation. Discard old-page requests rather
+    // than comparing new-page indices with the previous page's high-water mark.
+    runPwcli(['-s=' + session, 'requests', '--clear']);
     runPwcli(['-s=' + session, 'goto', userUrl]);
   } else {
     openCollectBrowser(session, userUrl, { profileDir });
   }
   await sleep(5000);
 
-  let captured = captureLatestPostResponse(session, debugDir, 'post');
+  let captured = captureLatestPostResponse(session, debugDir, 'post', afterIndex);
+  for (let attempt = 0; !captured?.usable && attempt < 10; attempt++) {
+    await sleep(1000);
+    captured = captureLatestPostResponse(session, debugDir, 'post', afterIndex);
+  }
   if (!captured?.usable) {
     captured = await waitForLoginAndPost(session, debugDir, {
-      loginTimeoutSeconds: args.loginTimeoutSeconds
+      loginTimeoutSeconds: args.loginTimeoutSeconds,
+      afterIndex
     });
   }
 
-  const result = importPostJsonToDb(args.dbPath, captured.jsonPath, {
-    secUserId: args.secUserId,
-    limit: args.limit
-  });
+  const expectedUser = args.secUserId || new URL(userUrl).pathname.split('/').filter(Boolean).pop();
+  captured.payload = JSON.parse(fs.readFileSync(captured.jsonPath, 'utf8'));
+  let result;
+  try {
+    result = await collectPages({
+      firstPage: captured,
+      limit: args.limit,
+      nextPage: previous => waitForNextPostPage(session, debugDir, previous.index, expectedUser, previous.payload.max_cursor),
+      importPage: page => {
+        const authors = page.payload.aweme_list.map(item => item.author?.sec_uid).filter(Boolean);
+        if (authors.some(id => id !== expectedUser)) throw new Error('Post response belongs to another user; collection stopped.');
+        const imported = importPostJsonToDb(args.dbPath, page.jsonPath, { secUserId: expectedUser, limit: args.limit });
+        console.log(`Saved post page ${page.index}: ${imported.imported} rows.`);
+        return imported;
+      },
+      count: () => countVideosForUser(args.dbPath, expectedUser)
+    });
+  } catch (error) {
+    // Keep partial collection usable even if a later page is blocked or times out.
+    exportCollectionDb(args.dbPath, path.join(outputDir, 'videos.json'), 'json');
+    exportCollectionDb(args.dbPath, path.join(outputDir, 'videos.csv'), 'csv');
+    throw error;
+  }
 
   const exportJson = path.join(outputDir, 'videos.json');
   const exportCsv = path.join(outputDir, 'videos.csv');
@@ -754,7 +807,7 @@ async function collectUser(args) {
 
   console.log(`Collected user videos from: ${userUrl}`);
   console.log(`Imported videos: ${result.imported}`);
-  console.log(`Skipped by limit: ${result.skippedByLimit}`);
+  console.log(`Pages: ${result.pages}; total videos: ${result.total}; stopped: ${result.reason}`);
   console.log(`Source JSON: ${captured.jsonPath}`);
   console.log(`Collection DB: ${path.resolve(args.dbPath)}`);
   console.log(`Export JSON: ${exportJson}`);
@@ -1335,7 +1388,7 @@ async function downloadVideo(videoInfo, outputDir, options = {}) {
   }
 
   await downloadFile(videoInfo.selected_quality.url, outputPath, showProgress);
-  if (downloadCover) {
+  if (downloadCover && videoInfo.selected_cover) {
     const coverResult = await downloadCoverImage(videoInfo, outputDir, {
       showProgress,
       writeMetadata: false
@@ -1493,7 +1546,8 @@ function parseArgs(args) {
     } else if (arg === '--download-limit' && args[i + 1]) {
       parsed.downloadLimit = Number(args[++i]) || 100;
     } else if (arg === '--limit' && args[i + 1]) {
-      parsed.limit = Number(args[++i]) || 100;
+      parsed.limit = Number(args[++i]);
+      if (!Number.isInteger(parsed.limit) || parsed.limit < 0) throw new Error('--limit must be a non-negative integer');
     } else if (arg === '--delay-seconds' && args[i + 1]) {
       parsed.delaySeconds = Math.max(5, Number(args[++i]) || 5);
     } else if (arg === '--confirm-every' && args[i + 1]) {
@@ -1637,4 +1691,7 @@ async function main() {
   }
 }
 
-main();
+if (require.main === module) main();
+module.exports = { collectVideoVariants, selectVariant, collectCoverVariants, selectCoverVariant,
+  importPostJsonToDb, countVideosForUser, initCollectionDb, runSqlite, extractRequestIndex,
+  downloadVideo, downloadAudio, downloadCoverImage, parseArgs, postRequestEntries };

@@ -9,7 +9,8 @@
 3. Check whether login cookies such as `sessionid` or `sid_guard` are available.
 4. Check whether the `/aweme/v1/web/aweme/post/` response contains usable `aweme_list` data.
 5. If login is unavailable, show a QR-login prompt and wait for the user to log in.
-6. After login, continue collection and save the response JSON to the output directory.
+6. After login, consume captured pages in order, scroll the works list for more pages, and save each response JSON.
+7. Stop at the configured cap or explicit end. Stop with an error on repeated cursors, no new items, invalid API responses or a next-page timeout; export saved rows even after a later failure.
 
 ## Check Login First
 
@@ -42,3 +43,7 @@ $env:PWCLI = "$HOME\.agents\skills\playwright\scripts\playwright_cli.cmd"
 ```
 
 PowerShell wrappers are also supported when `PWCLI` points to `playwright_cli.ps1`.
+
+## CLI response and pagination contract
+
+Use structured CLI output (`--json`) for request lists, response bodies and cookie lists, and unwrap the `result` string. The transport was exercised with Playwright CLI 0.1.22. Clear old requests with `requests --clear` before navigating a reused session: request numbering may reset after navigation. Start from `max_cursor=0`, and require each next request cursor to equal the preceding response cursor. Poll initial responses before assuming login has expired.

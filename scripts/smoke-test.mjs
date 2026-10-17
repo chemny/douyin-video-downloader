@@ -10,11 +10,14 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const requiredFiles = [
   'SKILL.md',
   'README.md',
-  'README.en.md',
+  'README.zh.md',
   'LICENSE',
   'SECURITY.md',
   'CHANGELOG.md',
   'douyin-video.js',
+  'lib/reliable-download.js',
+  'lib/collect-pages.js',
+  'tests/hardening.test.js',
   'package.json',
   'docs/agent-bootstrap.md',
   'docs/browser-login.md',
@@ -49,10 +52,10 @@ if (!/^---\n[\s\S]*?\n---/.test(skill)) errors.push('SKILL.md is missing YAML fr
 if (!/^name:\s*douyin-video-downloader/m.test(skill)) errors.push('SKILL.md frontmatter name is not douyin-video-downloader');
 if (!/^description:\s*\S+/m.test(skill)) errors.push('SKILL.md frontmatter description is missing');
 
-const readmeZh = await read('README.md');
-const readmeEn = await read('README.en.md');
-if (!readmeZh.includes('[English](./README.en.md)')) errors.push('README.md does not link to README.en.md');
-if (!readmeEn.includes('[中文](./README.md)')) errors.push('README.en.md does not link to README.md');
+const readmeZh = await read('README.zh.md');
+const readmeEn = await read('README.md');
+if (!readmeZh.includes('[English](./README.md)')) errors.push('README.zh.md does not link to README.md');
+if (!readmeEn.includes('[中文](./README.zh.md)')) errors.push('README.md does not link to README.zh.md');
 
 const nodeCheck = spawnSync('node', ['--check', 'douyin-video.js'], { cwd: repoRoot, encoding: 'utf8' });
 if (nodeCheck.status !== 0) errors.push(`node --check failed: ${(nodeCheck.stderr || nodeCheck.stdout).trim()}`);

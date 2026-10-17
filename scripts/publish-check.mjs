@@ -35,13 +35,13 @@ async function walk(dir, files = []) {
   return files;
 }
 
-const required = ['SKILL.md', 'README.md', 'README.en.md', 'LICENSE', '.gitignore', 'package.json', 'douyin-video.js'];
+const required = ['SKILL.md', 'README.md', 'README.zh.md', 'LICENSE', '.gitignore', 'package.json', 'douyin-video.js'];
 for (const file of required) {
   if (!existsSync(path.join(repoRoot, file))) addFail(`Missing required file: ${file}`);
 }
 
-if (existsSync(path.join(repoRoot, 'README.zh.md'))) {
-  addFail('README.zh.md still exists; publisher convention expects README.md + README.en.md');
+if (existsSync(path.join(repoRoot, 'README.en.md'))) {
+  addFail('Legacy README.en.md remains; use English README.md and Chinese README.zh.md');
 }
 
 const packageJson = JSON.parse(await read('package.json'));
@@ -49,16 +49,27 @@ if (!packageJson.scripts?.['smoke-test']) addFail('package.json missing scripts.
 if (!packageJson.scripts?.['publish-check']) addFail('package.json missing scripts.publish-check');
 
 const readme = await read('README.md');
-const readmeEn = await read('README.en.md');
-if (!readme.includes('[English](./README.en.md)')) addFail('README.md missing English language switch');
-if (!readmeEn.includes('[中文](./README.md)')) addFail('README.en.md missing Chinese language switch');
-if (!readme.includes('https://github.com/chemny/douyin-video-downloader.git')) addWarning('README.md clone URL is not the target GitHub repository');
-if (!readmeEn.includes('https://github.com/chemny/douyin-video-downloader.git')) addWarning('README.en.md clone URL is not the target GitHub repository');
+const readmeZh = await read('README.zh.md');
+if (!readme.includes('[中文](./README.zh.md)')) addFail('README.md missing Chinese language switch');
+if (!readmeZh.includes('[English](./README.md)')) addFail('README.zh.md missing English language switch');
+for (const [file, body, headings] of [
+  ['README.md', readme, ['Overview','Preview','Features','Installation','Quick Start','Usage Examples','How It Works','Repository Structure','License','About Me']],
+  ['README.zh.md', readmeZh, ['项目简介','效果预览','核心功能','安装','快速开始','使用示例','工作原理','目录结构','许可','关于我']]
+]) {
+  const actual = [...body.matchAll(/^## (.+)$/gm)].map(m => m[1]);
+  if (JSON.stringify(actual) !== JSON.stringify(headings)) addFail(`${file} section order does not match release structure`);
+  if (!body.includes('https://github.com/chemny/douyin-video-downloader')) addFail(`${file} missing installation repository URL`);
+  if (!body.includes('](./assets/workflow.svg)') || !existsSync(path.join(repoRoot, 'assets/workflow.svg'))) addFail(`${file} missing bundled workflow illustration`);
+}
 
 const skill = await read('SKILL.md');
 if (!/^---\n[\s\S]*?\n---/.test(skill)) addFail('SKILL.md missing YAML frontmatter');
 if (!/^name:\s*douyin-video-downloader/m.test(skill)) addFail('SKILL.md name mismatch');
 if (!/^description:\s*\S+/m.test(skill)) addFail('SKILL.md description missing');
+
+if (/^version:/m.test(skill)) addFail('Move version into metadata.version');
+const skillVersion = skill.match(/^  version:\s*(\S+)$/m)?.[1];
+if (skillVersion !== packageJson.version) addFail('metadata.version must match package.json version');
 
 const allFiles = await walk(repoRoot);
 const textExtensions = new Set(['.md', '.js', '.mjs', '.json', '.sh', '.ps1', '.gitignore']);
